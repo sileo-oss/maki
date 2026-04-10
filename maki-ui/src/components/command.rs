@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use crossterm::event::{KeyCode, KeyEvent};
-use maki_agent::McpPromptInfo;
 use maki_agent::command::CustomCommand;
+use maki_agent::{McpPromptInfo, McpSnapshot};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
@@ -119,22 +119,22 @@ pub struct CommandPalette {
     selected: usize,
     filtered: Vec<FilteredItem>,
     custom: Arc<[CustomCommand]>,
-    mcp_prompts_source: Arc<ArcSwap<Vec<McpPromptInfo>>>,
-    mcp_prompts: Arc<Vec<McpPromptInfo>>,
+    mcp_snapshot_source: Arc<ArcSwap<McpSnapshot>>,
+    mcp_prompts: Vec<McpPromptInfo>,
 }
 
 impl CommandPalette {
     pub fn new(
         custom_commands: Arc<[CustomCommand]>,
-        mcp_prompts: Arc<ArcSwap<Vec<McpPromptInfo>>>,
+        mcp_snapshot: Arc<ArcSwap<McpSnapshot>>,
     ) -> Self {
-        let snapshot = mcp_prompts.load_full();
+        let prompts = mcp_snapshot.load().prompts.clone();
         Self {
             selected: 0,
             filtered: Vec::new(),
             custom: custom_commands,
-            mcp_prompts_source: mcp_prompts,
-            mcp_prompts: snapshot,
+            mcp_snapshot_source: mcp_snapshot,
+            mcp_prompts: prompts,
         }
     }
 
@@ -175,7 +175,7 @@ impl CommandPalette {
     }
 
     pub fn sync(&mut self, input: &str) {
-        self.mcp_prompts = self.mcp_prompts_source.load_full();
+        self.mcp_prompts = self.mcp_snapshot_source.load().prompts.clone();
         let Some(stripped) = input.strip_prefix('/') else {
             self.filtered.clear();
             return;
@@ -374,18 +374,23 @@ mod tests {
     use maki_agent::McpPromptArg;
     use test_case::test_case;
 
-    fn empty_prompts() -> Arc<ArcSwap<Vec<McpPromptInfo>>> {
-        Arc::new(ArcSwap::from_pointee(Vec::new()))
+    fn empty_snapshot() -> Arc<ArcSwap<McpSnapshot>> {
+        Arc::new(ArcSwap::from_pointee(McpSnapshot {
+            infos: vec![],
+            prompts: vec![],
+            pids: vec![],
+            generation: 0,
+        }))
     }
 
     fn synced(input: &str) -> CommandPalette {
-        let mut p = CommandPalette::new(Arc::from([]), empty_prompts());
+        let mut p = CommandPalette::new(Arc::from([]), empty_snapshot());
         p.sync(input);
         p
     }
 
     fn synced_with_custom(input: &str, custom: Arc<[CustomCommand]>) -> CommandPalette {
-        let mut p = CommandPalette::new(custom, empty_prompts());
+        let mut p = CommandPalette::new(custom, empty_snapshot());
         p.sync(input);
         p
     }
@@ -456,7 +461,7 @@ mod tests {
 
     #[test]
     fn confirm_when_inactive_returns_none() {
-        let p = CommandPalette::new(Arc::from([]), empty_prompts());
+        let p = CommandPalette::new(Arc::from([]), empty_snapshot());
         assert!(p.confirm("").is_none());
     }
 
@@ -507,7 +512,7 @@ mod tests {
     #[test_case("/compact", "/compact", ""    ; "other_command")]
     #[test_case("/btw hello world", "/btw", "hello world" ; "btw_multi_word")]
     fn confirm_parses_args(input: &str, expected_name: &str, expected_args: &str) {
-        let mut p = CommandPalette::new(Arc::from([]), empty_prompts());
+        let mut p = CommandPalette::new(Arc::from([]), empty_snapshot());
         p.sync(input);
         let cmd = p.confirm(input).unwrap();
         assert_eq!(cmd.name, expected_name);
@@ -517,7 +522,7 @@ mod tests {
     #[test]
     fn confirm_custom_command() {
         let custom = sample_custom();
-        let mut p = CommandPalette::new(custom, empty_prompts());
+        let mut p = CommandPalette::new(custom, empty_snapshot());
         p.sync("/project:review");
         assert!(p.is_active());
         let cmd = p.confirm("/project:review some-file.rs").unwrap();
@@ -528,32 +533,37 @@ mod tests {
     #[test]
     fn find_custom_command_lookup() {
         let custom = sample_custom();
-        let p = CommandPalette::new(custom, empty_prompts());
+        let p = CommandPalette::new(custom, empty_snapshot());
         let found = p.find_custom_command("/project:review");
         assert!(found.is_some());
         assert_eq!(found.unwrap().content, "Review $ARGUMENTS");
         assert!(p.find_custom_command("/nonexistent").is_none());
     }
 
-    fn sample_prompts() -> Arc<ArcSwap<Vec<McpPromptInfo>>> {
-        Arc::new(ArcSwap::from_pointee(vec![
-            McpPromptInfo {
-                display_name: "myserver:code-review".into(),
-                qualified_name: "myserver/code-review".into(),
-                description: "Review code changes".into(),
-                arguments: vec![McpPromptArg {
-                    name: "diff".into(),
-                    description: "The diff".into(),
-                    required: true,
-                }],
-            },
-            McpPromptInfo {
-                display_name: "myserver:summarize".into(),
-                qualified_name: "myserver/summarize".into(),
-                description: "Summarize text".into(),
-                arguments: vec![],
-            },
-        ]))
+    fn sample_prompts() -> Arc<ArcSwap<McpSnapshot>> {
+        Arc::new(ArcSwap::from_pointee(McpSnapshot {
+            infos: vec![],
+            prompts: vec![
+                McpPromptInfo {
+                    display_name: "myserver:code-review".into(),
+                    qualified_name: "myserver/code-review".into(),
+                    description: "Review code changes".into(),
+                    arguments: vec![McpPromptArg {
+                        name: "diff".into(),
+                        description: "The diff".into(),
+                        required: true,
+                    }],
+                },
+                McpPromptInfo {
+                    display_name: "myserver:summarize".into(),
+                    qualified_name: "myserver/summarize".into(),
+                    description: "Summarize text".into(),
+                    arguments: vec![],
+                },
+            ],
+            pids: vec![],
+            generation: 0,
+        }))
     }
 
     fn synced_with_prompts(input: &str) -> CommandPalette {

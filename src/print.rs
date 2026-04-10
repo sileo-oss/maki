@@ -20,10 +20,12 @@ use std::io::{self, Read};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use arc_swap::ArcSwap;
 use clap::ValueEnum;
 use color_eyre::Result;
 use color_eyre::eyre::Context;
-use maki_agent::mcp::McpManager;
+use maki_agent::mcp;
+use maki_agent::mcp::McpSnapshot;
 use maki_agent::skill::Skill;
 use maki_agent::tools::{DescriptionContext, QUESTION_TOOL_NAME, ToolCall, ToolFilter};
 use maki_agent::{
@@ -153,10 +155,16 @@ pub fn run(
     };
     let mut tools = ToolCall::definitions(&vars, &ctx, model.supports_tool_examples());
 
-    let mcp_manager = smol::block_on(McpManager::start(&cwd_path));
+    let mcp_snapshot = Arc::new(ArcSwap::from_pointee(McpSnapshot {
+        infos: vec![],
+        prompts: vec![],
+        pids: vec![],
+        generation: 0,
+    }));
+    let mcp_handle = smol::block_on(mcp::start(&cwd_path, vec![], mcp_snapshot));
 
-    if let Some(ref mcp) = mcp_manager {
-        mcp.extend_tools(&mut tools, &[]);
+    if let Some(ref handle) = mcp_handle {
+        handle.extend_tools(&mut tools);
     }
 
     let system = agent::build_system_prompt(&vars, &mode, &instructions.text);
@@ -214,7 +222,7 @@ pub fn run(
             },
         )
         .with_loaded_instructions(instructions.loaded)
-        .with_mcp(mcp_manager);
+        .with_mcp(mcp_handle);
         let outcome = agent.run(input).await;
         if let Err(e) = outcome.result {
             error!(error = %e, "agent error");

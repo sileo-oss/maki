@@ -174,8 +174,7 @@ impl<'t> EventLoop<'t> {
             session,
             storage,
             bg.available,
-            Arc::clone(&mcp_state.infos),
-            Arc::clone(&mcp_state.prompts),
+            Arc::clone(&mcp_state.snapshot),
             Arc::clone(&storage_writer),
             ui_config,
             input_history_size,
@@ -241,6 +240,7 @@ impl<'t> EventLoop<'t> {
         self.app.poll_image_paste();
         self.app.btw_modal.poll();
         self.app.status_bar.poll_branch_update();
+        self.app.mcp_picker.refresh();
     }
 
     fn drain_channels(&mut self) -> bool {
@@ -455,14 +455,7 @@ impl<'t> EventLoop<'t> {
             .app
             .has_content()
             .then(|| self.app.state.session.id.clone());
-        maki_agent::mcp::kill_process_groups(
-            &self
-                .handles
-                .mcp
-                .pids
-                .lock()
-                .unwrap_or_else(|e| e.into_inner()),
-        );
+        maki_agent::mcp::kill_process_groups(&self.handles.mcp.snapshot.load().pids);
         self.app.cmd_tx = None;
         self.app.answer_tx = None;
         drop(self.app);

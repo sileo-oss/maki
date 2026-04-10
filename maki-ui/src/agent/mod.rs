@@ -9,10 +9,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use arc_swap::ArcSwap;
-use maki_agent::mcp::config::McpServerInfo;
 use maki_agent::permissions::PermissionManager;
 use maki_agent::skill::Skill;
-use maki_agent::{AgentConfig, CancelToken, Envelope, McpPromptInfo, ToolOutput};
+use maki_agent::{AgentConfig, CancelToken, Envelope, McpSnapshot, ToolOutput};
 
 use self::cancel_map::CancelMap;
 use maki_providers::provider::Provider;
@@ -36,12 +35,24 @@ pub(crate) enum AgentCommand {
     ToggleMcp(String, bool),
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub(crate) struct McpState {
     pub(crate) disabled: Vec<String>,
-    pub(crate) infos: Arc<ArcSwap<Vec<McpServerInfo>>>,
-    pub(crate) prompts: Arc<ArcSwap<Vec<McpPromptInfo>>>,
-    pub(crate) pids: Arc<Mutex<Vec<u32>>>,
+    pub(crate) snapshot: Arc<ArcSwap<McpSnapshot>>,
+}
+
+impl Default for McpState {
+    fn default() -> Self {
+        Self {
+            disabled: Vec::new(),
+            snapshot: Arc::new(ArcSwap::from_pointee(McpSnapshot {
+                infos: vec![],
+                prompts: vec![],
+                pids: vec![],
+                generation: 0,
+            })),
+        }
+    }
 }
 
 pub(crate) struct AgentHandles {
@@ -151,9 +162,7 @@ pub(crate) fn spawn_agent(
         config,
         initial_history,
         Arc::clone(&shared_history),
-        Arc::clone(&mcp_state.infos),
-        Arc::clone(&mcp_state.prompts),
-        Arc::clone(&mcp_state.pids),
+        Arc::clone(&mcp_state.snapshot),
         mcp_state.disabled.clone(),
         Arc::clone(permissions),
         agent_tx,

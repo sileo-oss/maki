@@ -36,6 +36,7 @@ tracing-subscriber = { workspace = true }
 smol = { workspace = true }
 futures-lite = { workspace = true }
 flume = { workspace = true }
+arc-swap = { workspace = true }
 
 [dev-dependencies]
 test-case = { workspace = true }

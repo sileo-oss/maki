@@ -9,7 +9,8 @@ use arc_swap::ArcSwap;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind};
 use maki_agent::permissions::PermissionManager;
 use maki_agent::{
-    QuestionInfo, QuestionOption, ToolDoneEvent, ToolOutput, ToolStartEvent, TurnCompleteEvent,
+    McpSnapshot, QuestionInfo, QuestionOption, ToolDoneEvent, ToolOutput, ToolStartEvent,
+    TurnCompleteEvent,
 };
 use maki_config::{PermissionsConfig, UiConfig};
 use maki_providers::TokenUsage;
@@ -29,7 +30,12 @@ fn set_zone(app: &mut App, zone: SelectionZone, area: Rect) {
 
 fn test_app() -> App {
     let writer = Arc::new(StorageWriter::new(DataDir::from_path(env::temp_dir())));
-    let mcp_infos = Arc::new(ArcSwap::from_pointee(Vec::new()));
+    let mcp_snapshot = Arc::new(ArcSwap::from_pointee(McpSnapshot {
+        infos: vec![],
+        prompts: vec![],
+        pids: vec![],
+        generation: 0,
+    }));
     let permissions = Arc::new(PermissionManager::new(
         PermissionsConfig {
             allow_all: false,
@@ -43,8 +49,7 @@ fn test_app() -> App {
         AppSession::new("test-model", "/tmp/test"),
         DataDir::from_path(env::temp_dir()),
         Arc::new(ArcSwapOption::empty()),
-        mcp_infos,
-        Arc::new(ArcSwap::from_pointee(Vec::new())),
+        mcp_snapshot,
         writer,
         UiConfig::default(),
         100,
@@ -443,15 +448,19 @@ fn load_session_clears_plan() {
     let writer = Arc::new(StorageWriter::new(DataDir::from_path(
         tmp.path().to_path_buf(),
     )));
-    let mcp_infos = Arc::new(ArcSwap::from_pointee(Vec::new()));
+    let mcp_snapshot = Arc::new(ArcSwap::from_pointee(McpSnapshot {
+        infos: vec![],
+        prompts: vec![],
+        pids: vec![],
+        generation: 0,
+    }));
     let model = test_model();
     let mut app = App::new(
         &model,
         AppSession::new("test-model", "/tmp/test"),
         dir,
         Arc::new(ArcSwapOption::empty()),
-        mcp_infos,
-        Arc::new(ArcSwap::from_pointee(Vec::new())),
+        mcp_snapshot,
         writer,
         UiConfig::default(),
         100,
@@ -1649,15 +1658,20 @@ fn mcp_toggle_dispatches_action() {
     use std::path::PathBuf;
 
     let mut app = test_app();
-    app.mcp_picker = McpPicker::new(Arc::new(ArcSwap::from_pointee(vec![McpServerInfo {
-        name: "test-srv".into(),
-        transport_kind: "stdio",
-        tool_count: 2,
-        prompt_count: 0,
-        status: McpServerStatus::Running,
-        config_path: PathBuf::from("/tmp/config.toml"),
-        url: None,
-    }])));
+    app.mcp_picker = McpPicker::new(Arc::new(ArcSwap::from_pointee(McpSnapshot {
+        infos: vec![McpServerInfo {
+            name: "test-srv".into(),
+            transport_kind: "stdio",
+            tool_count: 2,
+            prompt_count: 0,
+            status: McpServerStatus::Running,
+            config_path: PathBuf::from("/tmp/config.toml"),
+            url: None,
+        }],
+        prompts: vec![],
+        pids: vec![],
+        generation: 0,
+    })));
     app.execute_command(cmd("/mcp"));
 
     let actions = app.update(Msg::Key(key(KeyCode::Enter)));
